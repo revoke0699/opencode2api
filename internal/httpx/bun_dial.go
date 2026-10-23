@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	rand "math/rand/v2"
 	"net"
 	"net/http"
 	"net/url"
@@ -80,6 +81,41 @@ func bunClientHello() *utls.ClientHelloSpec {
 	}
 }
 
+// presetProfiles maps the fingerprint profile names to the uTLS presets the
+// transport can present. Browser presets offer HTTP/2 by default; the
+// transport speaks HTTP/1.1 only, so clientHelloFor rewrites their ALPN list.
+var presetProfiles = map[string]utls.ClientHelloID{
+	"chrome":     utls.HelloChrome_133,
+	"firefox":    utls.HelloFirefox_120,
+	"safari":     utls.HelloSafari_16_0,
+	"edge":       utls.HelloEdge_85,
+	"randomized": utls.HelloRandomizedALPN,
+}
+
+// clientHelloFor returns a fresh ClientHello spec for profile. uTLS keeps
+// handshake state in the spec's extensions, so callers must not reuse one.
+func clientHelloFor(profile string) (*utls.ClientHelloSpec, error) {
+	switch profile {
+	case "", "bun":
+		return bunClientHello(), nil
+	}
+	id, ok := presetProfiles[profile]
+	if !ok {
+		return nil, fmt.Errorf("unknown TLS fingerprint profile %q", profile)
+	}
+	spec, err := utls.UTLSIdToSpec(id)
+	if err != nil {
+		return nil, fmt.Errorf("build TLS fingerprint %q: %w", profile, err)
+	}
+	for i, extension := range spec.Extensions {
+		if alpn, ok := extension.(*utls.ALPNExtension); ok {
+			alpn.AlpnProtocols = []string{"http/1.1"}
+			spec.Extensions[i] = alpn
+		}
+	}
+	return &spec, nil
+}
+
 // dial opens a connection to addr ("host:port"), through the transport's
 // proxy when it has one, and completes the Bun TLS handshake with serverName
 // for https. A proxy failure comes back as a *net.OpError whose Op is
@@ -97,7 +133,16 @@ func (t *BunTransport) dial(ctx context.Context, scheme, addr, serverName string
 		return conn, err
 	}
 	tlsConn := utls.UClient(conn, &utls.Config{ServerName: serverName}, utls.HelloCustom)
-	if err := tlsConn.ApplyPreset(bunClientHello()); err != nil {
+	profile := t.profiles[0]
+	if t.rotate && len(t.profiles) > 1 {
+		profile = t.profiles[rand.IntN(len(t.profiles))]
+	}
+	hello, err := clientHelloFor(profile)
+	if err != nil {
+		conn.Close()
+		return nil, err
+	}
+	if err := tlsConn.ApplyPreset(hello); err != nil {
 		conn.Close()
 		return nil, err
 	}

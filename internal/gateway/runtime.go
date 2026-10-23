@@ -384,17 +384,19 @@ type KeyStatus struct {
 }
 
 // ProxyStatus describes one proxy route: its redacted address, its health,
-// whether a health check is in flight, and how many Zen and Go keys are bound
-// to it. Anonymous reports whether the anonymous lane, which uses every
-// proxy, is enabled.
+// the TLS fingerprint profile bound to it (or "random" for per-connection
+// rotation), whether a health check is in flight, and how many Zen and Go keys
+// are bound to it. Anonymous reports whether the anonymous lane, which uses
+// every proxy, is enabled.
 type ProxyStatus struct {
-	Index     int    `json:"index"`
-	Address   string `json:"address"`
-	Healthy   bool   `json:"healthy"`
-	Checking  bool   `json:"checking"`
-	ZenKeys   int    `json:"zen_keys"`
-	GoKeys    int    `json:"go_keys"`
-	Anonymous bool   `json:"anonymous"`
+	Index       int    `json:"index"`
+	Address     string `json:"address"`
+	Healthy     bool   `json:"healthy"`
+	Checking    bool   `json:"checking"`
+	Fingerprint string `json:"fingerprint"`
+	ZenKeys     int    `json:"zen_keys"`
+	GoKeys      int    `json:"go_keys"`
+	Anonymous   bool   `json:"anonymous"`
 }
 
 // Resources reports the current runtime's servable models, per-key state and
@@ -418,7 +420,7 @@ func (m *RuntimeController) Resources() ResourceSnapshot {
 	goBindings := append([]int(nil), gateway.goNodes.bindingCount...)
 	gateway.goNodes.bindingsMu.Unlock()
 	for _, proxy := range gateway.transports.items {
-		status := ProxyStatus{Index: proxy.index, Address: config.RedactURL(proxy.name), Healthy: proxy.healthy.Load(), Checking: proxy.checking.Load(), Anonymous: gateway.cfg.Anonymous}
+		status := ProxyStatus{Index: proxy.index, Address: config.RedactURL(proxy.name), Healthy: proxy.healthy.Load(), Checking: proxy.checking.Load(), Fingerprint: proxy.fingerprint, Anonymous: gateway.cfg.Anonymous}
 		if proxy.index < len(zenBindings) {
 			status.ZenKeys = zenBindings[proxy.index]
 		}

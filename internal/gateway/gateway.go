@@ -102,7 +102,7 @@ func New(cfg config.Config, logger *slog.Logger, monitor *telemetry.Metrics) (*G
 	if err != nil {
 		return nil, err
 	}
-	transports, err := transportPool(cfg.RuntimeProxies(), cfg.Performance, cfg.Performance.AttemptTimeout(time.Duration(cfg.Retry.TimeoutSeconds)*time.Second))
+	transports, err := transportPool(cfg.RuntimeProxies(), cfg.Performance, cfg.Fingerprint, cfg.Performance.AttemptTimeout(time.Duration(cfg.Retry.TimeoutSeconds)*time.Second))
 	if err != nil {
 		return nil, err
 	}

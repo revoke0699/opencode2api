@@ -37,6 +37,11 @@
     "max_anonymous_exits": 8,
     "free_tier_block_seconds": 900
   },
+  "fingerprint": {
+    "mode": "random",
+    "rotate": "proxy",
+    "profiles": ["bun", "chrome", "firefox", "safari"]
+  },
   "logging": {
     "level": "info",
     "ring_size": 2000,

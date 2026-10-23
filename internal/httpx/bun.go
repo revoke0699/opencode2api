@@ -27,7 +27,9 @@ import (
 )
 
 // BunOptions configures a BunTransport. The fields mirror their namesakes on
-// http.Transport; a nil Proxy dials the upstream directly.
+// http.Transport; a nil Proxy dials the upstream directly. Profiles lists the
+// TLS profiles the transport may present (bun by default); when Rotate is set,
+// every new connection draws one at random instead of always using the first.
 type BunOptions struct {
 	Proxy                 *url.URL
 	ConnectTimeout        time.Duration
@@ -35,6 +37,8 @@ type BunOptions struct {
 	IdleConnTimeout       time.Duration
 	MaxIdleConnsPerHost   int
 	DisableKeepAlives     bool
+	Profiles              []string
+	Rotate                bool
 }
 
 // BunTransport is an http.RoundTripper that puts requests on the wire the way
@@ -58,6 +62,8 @@ type BunTransport struct {
 	idleTimeout           time.Duration
 	maxIdlePerHost        int
 	keepAlive             bool
+	profiles              []string
+	rotate                bool
 
 	mu   sync.Mutex
 	idle map[string][]*bunConn
@@ -77,6 +83,15 @@ func NewBunTransport(options BunOptions) (*BunTransport, error) {
 	if maxIdle == 0 {
 		maxIdle = http.DefaultMaxIdleConnsPerHost
 	}
+	profiles := options.Profiles
+	if len(profiles) == 0 {
+		profiles = []string{"bun"}
+	}
+	for _, profile := range profiles {
+		if _, err := clientHelloFor(profile); err != nil {
+			return nil, err
+		}
+	}
 	return &BunTransport{
 		proxy:                 options.Proxy,
 		dialer:                &net.Dialer{Timeout: options.ConnectTimeout, KeepAlive: 30 * time.Second},
@@ -84,6 +99,8 @@ func NewBunTransport(options BunOptions) (*BunTransport, error) {
 		idleTimeout:           options.IdleConnTimeout,
 		maxIdlePerHost:        maxIdle,
 		keepAlive:             !options.DisableKeepAlives,
+		profiles:              append([]string(nil), profiles...),
+		rotate:                options.Rotate,
 		idle:                  map[string][]*bunConn{},
 	}, nil
 }

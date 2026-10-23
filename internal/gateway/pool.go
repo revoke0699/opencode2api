@@ -35,6 +35,7 @@ type proxyTransport struct {
 	pool         bool
 	client       *http.Client
 	bun          *http.Client
+	fingerprint  string
 	healthy      atomic.Bool
 	checking     atomic.Bool
 	blockedUntil atomic.Int64
@@ -437,9 +438,21 @@ func (p *proxyTransports) healthCounts() (total, healthy int) {
 // transports without keep-alives, so every attempt opens a new connection
 // through the pool; "direct" dials the upstream without any proxy, ignoring
 // the proxy environment variables.
-func transportPool(proxies []string, cfg config.PerformanceConfig, responseHeaderTimeout time.Duration) (*proxyTransports, error) {
+func transportPool(proxies []string, cfg config.PerformanceConfig, fingerprint config.FingerprintConfig, responseHeaderTimeout time.Duration) (*proxyTransports, error) {
 	p := &proxyTransports{items: make([]*proxyTransport, 0, len(proxies))}
+	profileList := fingerprint.ProfilesOrDefault()
+	rotate := fingerprint.Mode == config.FingerprintRandom && fingerprint.Rotate == config.FingerprintRotateConnection
 	for _, raw := range proxies {
+		profile := profileList[0]
+		transportProfiles := profileList
+		if fingerprint.Mode == config.FingerprintRandom {
+			if rotate {
+				profile = "random"
+			} else {
+				profile = profileList[len(p.items)%len(profileList)]
+				transportProfiles = []string{profile}
+			}
+		}
 		clean, isPool := config.ParseProxyEntry(raw)
 		transport := http.DefaultTransport.(*http.Transport).Clone()
 		transport.MaxIdleConns = cfg.MaxIdleConns
@@ -486,11 +499,13 @@ func transportPool(proxies []string, cfg config.PerformanceConfig, responseHeade
 			IdleConnTimeout:       transport.IdleConnTimeout,
 			MaxIdleConnsPerHost:   cfg.MaxIdleConnsPerHost,
 			DisableKeepAlives:     isPool,
+			Profiles:              transportProfiles,
+			Rotate:                rotate,
 		})
 		if err != nil {
 			return nil, fmt.Errorf("proxy %s: %w", config.RedactURL(raw), err)
 		}
-		proxy := &proxyTransport{index: len(p.items), name: raw, pool: isPool, client: &http.Client{Transport: transport}, bun: &http.Client{Transport: bun}}
+		proxy := &proxyTransport{index: len(p.items), name: raw, pool: isPool, fingerprint: profile, client: &http.Client{Transport: transport}, bun: &http.Client{Transport: bun}}
 		proxy.healthy.Store(true)
 		p.items = append(p.items, proxy)
 	}

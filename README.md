@@ -273,6 +273,9 @@ See [config.example.json](config.example.json) for a complete starting configura
 | `headless.instances`        | Empty. Addresses of several `opencode serve` processes; a blocked address cools down and the next one is used. |
 | `proxies`                   | Falls back to `["direct"]` when both proxy sources are empty.               |
 | `proxyfile`                 | Optional; relative paths resolve beside the configuration file.             |
+| `fingerprint.mode`          | `fixed`; use `random` to rotate the TLS ClientHello.                        |
+| `fingerprint.rotate`        | `proxy`; one profile per exit, or `connection` for one profile per TLS connection. |
+| `fingerprint.profiles`      | `["bun","chrome","firefox","safari"]` when `random`; `bun`, `chrome`, `firefox`, `safari`, `edge`, `randomized`. |
 | `models.refresh_seconds`    | `300`; minimum 1.                                                           |
 | `models.protocols`          | `{}`; per-model native protocol overrides.                                  |
 | `models.free_only`          | `false`; expose and route only free models, even with Zen or Go keys.       |
@@ -346,6 +349,22 @@ A pool entry is handled differently from a static proxy:
 | Anonymous lane retries    | One visit per exit, up to `performance.max_anonymous_exits` exits   | Up to `retry.max_attempts`, cycling the pool entry                            |
 
 Use it when the endpoint behind the URL already performs the rotation and the pool's own exit IPs are individually rate-limited or flaky; the gateway then treats each attempt as a fresh endpoint instead of pinning the conversation to one exit. A single `#pool` entry is enough — you no longer need to list dozens of exits. Static entries keep the pooling behavior described below.
+
+### TLS fingerprints and proxy binding
+
+Free-model traffic to `/inference` and `/zen` uses the Bun-disguised transport. By default it presents the captured Bun ClientHello on every connection. Set `fingerprint.mode` to `random` to rotate through `fingerprint.profiles`:
+
+```json
+"fingerprint": {
+  "mode": "random",
+  "rotate": "proxy",
+  "profiles": ["bun", "chrome", "firefox", "safari"]
+}
+```
+
+With `rotate: "proxy"`, each configured exit is assigned one profile at startup, so a conversation keeps the same TLS fingerprint while it stays on that exit; a proxy failover also changes the fingerprint. With `rotate: "connection"`, every new TLS connection draws a profile, which suits `#pool` endpoints that already open a fresh tunnel per request or a deployment with a single `direct` entry. Browser presets are rewritten to offer HTTP/1.1 only, the protocol this transport speaks.
+
+The HTTP layer keeps the OpenCode client identity: the lane's `User-Agent`, `x-opencode-*` headers, header order and body shape are unchanged. Fingerprint rotation is a TLS-layer setting, not a change of the application identity.
 
 ### Timeouts and connection pools
 

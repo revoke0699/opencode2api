@@ -41,6 +41,10 @@ type Config struct {
 	Retry       RetryConfig       `json:"retry"`
 	Models      ModelsConfig      `json:"models"`
 	Performance PerformanceConfig `json:"performance"`
+	// Fingerprint controls the TLS ClientHello used by the Bun-disguised
+	// transport. The zero value keeps the captured Bun profile; random rotates
+	// the profile per proxy or per connection.
+	Fingerprint FingerprintConfig `json:"fingerprint"`
 	Logging     LoggingConfig     `json:"logging"`
 	WebUI       WebUIConfig       `json:"webui"`
 	Prefer      Tier              `json:"prefer"`
@@ -237,6 +241,81 @@ type PerformanceConfig struct {
 	FreeTierBlockSeconds int `json:"free_tier_block_seconds"`
 }
 
+// FingerprintConfig selects the TLS ClientHello of the Bun-disguised
+// transport. Mode "fixed" keeps the captured Bun profile. Mode "random"
+// rotates through Profiles:
+//
+//   - rotate "proxy" assigns one profile to each configured proxy at startup,
+//     so every exit keeps a stable fingerprint and a proxy failover also
+//     changes the fingerprint.
+//   - rotate "connection" draws a new profile for every new TLS connection.
+//
+// Profiles are profile names understood by httpx (bun, chrome, firefox,
+// safari, edge, randomized). Browser profiles are forced to HTTP/1.1 because
+// the transport speaks HTTP/1.1 only.
+type FingerprintConfig struct {
+	Mode     string   `json:"mode,omitempty"`
+	Rotate   string   `json:"rotate,omitempty"`
+	Profiles []string `json:"profiles,omitempty"`
+}
+
+const (
+	FingerprintFixed  = "fixed"
+	FingerprintRandom = "random"
+
+	FingerprintRotateProxy      = "proxy"
+	FingerprintRotateConnection = "connection"
+)
+
+// DefaultFingerprintProfiles is the pool used by mode "random" when the
+// operator lists none. Every entry is a real client family; the first is the
+// captured Bun runtime.
+var DefaultFingerprintProfiles = []string{"bun", "chrome", "firefox", "safari"}
+
+// Normalize trims and validates the fingerprint settings.
+func (f *FingerprintConfig) Normalize() error {
+	f.Mode = strings.ToLower(strings.TrimSpace(f.Mode))
+	if f.Mode == "" {
+		f.Mode = FingerprintFixed
+	}
+	switch f.Mode {
+	case FingerprintFixed, FingerprintRandom:
+	default:
+		return errors.New("fingerprint.mode must be \"fixed\" or \"random\"")
+	}
+	f.Rotate = strings.ToLower(strings.TrimSpace(f.Rotate))
+	if f.Rotate == "" {
+		f.Rotate = FingerprintRotateProxy
+	}
+	switch f.Rotate {
+	case FingerprintRotateProxy, FingerprintRotateConnection:
+	default:
+		return errors.New("fingerprint.rotate must be \"proxy\" or \"connection\"")
+	}
+	for i := range f.Profiles {
+		f.Profiles[i] = strings.ToLower(strings.TrimSpace(f.Profiles[i]))
+	}
+	trimList(&f.Profiles)
+	if f.Mode == FingerprintRandom && len(f.Profiles) == 0 {
+		f.Profiles = append([]string(nil), DefaultFingerprintProfiles...)
+	}
+	if f.Mode == FingerprintFixed {
+		f.Profiles = []string{"bun"}
+	}
+	return nil
+}
+
+// ProfilesOrDefault returns the effective profile list for the transport.
+func (f FingerprintConfig) ProfilesOrDefault() []string {
+	if len(f.Profiles) > 0 {
+		return append([]string(nil), f.Profiles...)
+	}
+	if f.Mode == FingerprintRandom {
+		return append([]string(nil), DefaultFingerprintProfiles...)
+	}
+	return []string{"bun"}
+}
+
 // AttemptTimeout returns the bound for a single upstream attempt. When
 // attempt_timeout_seconds is positive the result is that setting, capped at
 // requestTimeout only when requestTimeout is positive. Otherwise the result is
@@ -389,6 +468,9 @@ func Normalize(path string, cfg Config) (Config, error) {
 	}
 	if cfg.Performance.FreeTierBlockSeconds < 0 {
 		return Config{}, errors.New("performance.free_tier_block_seconds must not be negative (0 uses the built-in cool-down)")
+	}
+	if err := cfg.Fingerprint.Normalize(); err != nil {
+		return Config{}, err
 	}
 	if cfg.Logging.Level != "debug" && cfg.Logging.Level != "info" && cfg.Logging.Level != "warn" && cfg.Logging.Level != "error" {
 		return Config{}, errors.New("logging.level must be debug, info, warn, or error")
