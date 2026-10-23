@@ -15,20 +15,17 @@ func TestHeadlessPoolSkipsCoolingIdentity(t *testing.T) {
 		{BaseURL: "http://127.0.0.1:4099"},
 	}
 	now := time.Now()
+	pool.succeed(instances[2].BaseURL)
 	first := pool.order(instances, now)
-	if len(first) != 3 || first[0].BaseURL != instances[0].BaseURL {
-		t.Fatalf("first order = %+v", first)
+	if len(first) != 3 || first[0].BaseURL != instances[2].BaseURL {
+		t.Fatalf("sticky order = %+v", first)
 	}
-	pool.cool(instances[0].BaseURL, now.Add(time.Minute))
+	pool.cool(instances[2].BaseURL, now.Add(time.Minute))
 	second := pool.order(instances, now)
-	if len(second) != 2 || second[0].BaseURL != instances[1].BaseURL {
-		t.Fatalf("second order = %+v", second)
+	if len(second) != 2 || second[0].BaseURL == instances[2].BaseURL {
+		t.Fatalf("cooled order = %+v", second)
 	}
-	third := pool.order(instances, now)
-	if len(third) != 2 || third[0].BaseURL != instances[2].BaseURL {
-		t.Fatalf("third order = %+v", third)
-	}
-	if got := pool.order(instances, now.Add(2*time.Minute)); len(got) != 3 {
+	if got := pool.order(instances, now.Add(2*time.Minute)); len(got) != 3 || got[0].BaseURL != instances[2].BaseURL {
 		t.Fatalf("recovered order = %+v", got)
 	}
 }

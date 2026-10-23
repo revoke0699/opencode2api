@@ -12,12 +12,19 @@ import (
 // instead, which is longer.
 const headlessTransportCool = 30 * time.Second
 
-// headlessPool rotates official serve processes. A cooled base URL is skipped
-// until its deadline so a banned fingerprint is not retried on every request.
+// headlessAttemptTimeout bounds one identity. A serve process that hangs on a
+// dead egress must not consume the whole client deadline before the next
+// identity is tried.
+const headlessAttemptTimeout = 45 * time.Second
+
+// headlessPool rotates official serve processes. It stays on the last
+// identity that succeeded, and skips a cooled base URL until its deadline so
+// a banned fingerprint is not retried on every request.
 type headlessPool struct {
-	mu    sync.Mutex
-	next  int
-	until map[string]time.Time
+	mu     sync.Mutex
+	next   int
+	sticky string
+	until  map[string]time.Time
 }
 
 func newHeadlessPool() *headlessPool {
@@ -33,7 +40,18 @@ func (p *headlessPool) order(instances []config.HeadlessInstance, now time.Time)
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	start := p.next % len(instances)
-	p.next = start + 1
+	if p.sticky != "" {
+		for i, inst := range instances {
+			if inst.BaseURL != p.sticky {
+				continue
+			}
+			if until, ok := p.until[inst.BaseURL]; !ok || !now.Before(until) {
+				start = i
+			}
+			break
+		}
+	}
+	p.next = (start + 1) % len(instances)
 	out := make([]config.HeadlessInstance, 0, len(instances))
 	for i := 0; i < len(instances); i++ {
 		inst := instances[(start+i)%len(instances)]
@@ -43,6 +61,16 @@ func (p *headlessPool) order(instances []config.HeadlessInstance, now time.Time)
 		out = append(out, inst)
 	}
 	return out
+}
+
+func (p *headlessPool) succeed(baseURL string) {
+	if p == nil || baseURL == "" {
+		return
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.sticky = baseURL
+	delete(p.until, baseURL)
 }
 
 func (p *headlessPool) cool(baseURL string, until time.Time) {

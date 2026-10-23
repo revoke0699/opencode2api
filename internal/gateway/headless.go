@@ -61,10 +61,12 @@ func (g *Gateway) serveHeadless(ctx context.Context, route models.Route, bodies 
 		if password == "" {
 			password = g.cfg.Headless.Password
 		}
+		attemptCtx, cancel := context.WithTimeout(ctx, headlessAttemptTimeout)
 		result, err := (headless.Client{
 			BaseURL:  inst.BaseURL,
 			Password: password,
-		}).Complete(ctx, provider, modelID, prompt)
+		}).Complete(attemptCtx, provider, modelID, prompt)
+		cancel()
 		if err != nil {
 			lastErr = err
 			g.recordUpstreamAttempt(ctx, route, ids, attempt+1, label, "headless", false, nil, nil, err, time.Since(started))
@@ -93,6 +95,7 @@ func (g *Gateway) serveHeadless(ctx context.Context, route models.Route, bodies 
 		}
 		resp.Header.Set("Content-Type", contentType)
 		g.recordUpstreamAttempt(ctx, route, ids, attempt+1, label, "headless", false, nil, resp, nil, time.Since(started))
+		g.headless.succeed(inst.BaseURL)
 		return resp, nil
 	}
 	if lastErr == nil {

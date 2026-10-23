@@ -209,7 +209,7 @@ System One 将自由文本状态与类型化问题配对，并返回类型化答
 
 这只是网关的路由判断，上游仍可能拒绝或限制请求。匿名请求在上游认证头中使用 `public` 凭证。
 
-启用 `headless.enabled` 后，匿名免费请求不再伪造 `public` 凭证，而是发给本机官方 `opencode serve`（`headless.base_url` 为空时默认 `http://127.0.0.1:4097`）。网关为每次请求新建一个 session，把对话收成文本，再把助手文本合成 Chat Completions；客户端要求流式时，在拿到完整回复后输出一段 SSE。已配置的 Zen / Go Key 保持不变，只有 headless 失败时才进入这些 Key。`headless.instances` 列出多份官方进程时，网关轮流使用；某一份返回 IP 滥用、免费额度或 FreeTier 拒绝时，会冷却该地址并在同一次请求里改用下一份。同一份官方二进制的 TLS 指纹相同，要让上游看到不同身份，每份进程需要自己的数据目录和出口。`headless.password` 对应用 serve 上的 `OPENCODE_SERVER_PASSWORD`，用户名固定为 `opencode`。WebUI 保存时密码留空表示保持原值。容器里的网关访问不到宿主机的 `127.0.0.1`，这时把地址写成 serve 在同一 Docker 网络上的名字。
+启用 `headless.enabled` 后，匿名免费请求不再伪造 `public` 凭证，而是发给本机官方 `opencode serve`（`headless.base_url` 为空时默认 `http://127.0.0.1:4097`）。网关为每次请求新建一个 session，把对话收成文本，再把助手文本合成 Chat Completions；客户端要求流式时，在拿到完整回复后输出一段 SSE。已配置的 Zen / Go Key 保持不变，只有 headless 失败时才进入这些 Key。`headless.instances` 列出多份官方进程时，网关沿用上一份成功的身份；某一份返回 IP 滥用、免费额度或 FreeTier 拒绝，或单次调用超过 45 秒没有返回，会冷却该地址并在同一次请求里改用下一份。同一份官方二进制的 TLS 指纹相同，要让上游看到不同身份，每份进程需要自己的数据目录和出口。`headless.password` 对应用 serve 上的 `OPENCODE_SERVER_PASSWORD`，用户名固定为 `opencode`。WebUI 保存时密码留空表示保持原值。容器里的网关访问不到宿主机的 `127.0.0.1`，这时把地址写成 serve 在同一 Docker 网络上的名字。
 
 路由顺序：
 
