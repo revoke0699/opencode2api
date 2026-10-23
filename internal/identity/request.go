@@ -23,13 +23,15 @@ import (
 )
 
 // RequestIDs carries the identity headers the upstream free tier inspects.
-// Session is the conversation-affinity key sent as x-opencode-session; the
-// v2 lane sends ChildSession, the client's own x-opencode-session-id, as
-// x-opencode-session-id so a subagent keeps its child id while affinity stays
-// on the parent. The v1 lane sends Session as both headers. Message is the
-// user message id the v1 lane receives as x-opencode-request; the v2 lane
-// rejects that header. Request only identifies the request inside the
-// gateway. Project is rendered per lane by the gateway.
+// Session is the conversation-affinity key derived from x-opencode-session,
+// which the official client sets to the current (child) session on the v1 lane
+// and to the canonical parent on the v2 lane. ChildSession preserves the
+// client's own x-opencode-session-id; the v1 lane sends it in both session
+// headers, as the official 1.x client does for a subagent, while the v2 lane
+// keeps affinity on the parent. Message is the user message id the v1 lane
+// receives as x-opencode-request; the v2 lane rejects that header. Request only
+// identifies the request inside the gateway. Project is rendered per lane by
+// the gateway.
 type RequestIDs struct {
 	Session       string
 	ChildSession  string
@@ -86,6 +88,7 @@ func DeriveRequestIDs(r *http.Request, body map[string]any, scope string) Reques
 		}
 	}
 	parentSession := jsonutil.FirstString(
+		r.Header.Get("x-opencode-parent-session-id"),
 		r.Header.Get("x-parent-session-id"),
 		jsonutil.StringAt(body, "metadata", "parent_session_id"),
 	)

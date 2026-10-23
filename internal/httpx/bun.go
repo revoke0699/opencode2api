@@ -103,6 +103,23 @@ type bunConn struct {
 	watchErr error
 }
 
+// contentLengthPlacementKey marks a request whose runtime writes
+// Content-Length in the common-header block instead of after Accept-Encoding.
+type contentLengthPlacementKey struct{}
+
+// WithLeadingContentLength makes BunTransport place Content-Length among the
+// common headers, the position the OpenCode 2.x client's fetch runtime uses.
+// The 1.x client, which shares this transport, trails the header after
+// Accept-Encoding; callers on that lane leave the context untouched.
+func WithLeadingContentLength(ctx context.Context) context.Context {
+	return context.WithValue(ctx, contentLengthPlacementKey{}, true)
+}
+
+func leadingContentLength(ctx context.Context) bool {
+	leading, _ := ctx.Value(contentLengthPlacementKey{}).(bool)
+	return leading
+}
+
 // RoundTrip sends req and returns the response headers; the body is read
 // straight off the connection. The request body is read fully before
 // anything is sent. Header names and values must be valid HTTP fields. Once
@@ -116,7 +133,7 @@ func (t *BunTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	if u == nil || u.Host == "" || u.Scheme != "https" && u.Scheme != "http" {
 		return nil, fmt.Errorf("bun transport: unsupported request URL %q", u)
 	}
-	head, decompress, err := bunRequestHead(req, body)
+	head, decompress, err := bunRequestHead(req, body, leadingContentLength(req.Context()))
 	if err != nil {
 		return nil, err
 	}
@@ -500,9 +517,11 @@ var bunCommonHeaders = []string{
 // An Accept of "*/*" is written where fetch adds its default, since that is
 // where the official clients' Accept appears. Host, Connection,
 // Content-Length and Transfer-Encoding belong to the transport, so caller
-// values for them are ignored. decompress reports whether the transport added
-// Accept-Encoding and so decodes the response.
-func bunRequestHead(req *http.Request, body []byte) ([]byte, bool, error) {
+// values for them are ignored. leadingLength moves Content-Length into the
+// common-header block, where the 2.x runtime writes it; the 1.x runtime
+// leaves it after Accept-Encoding. decompress reports whether the transport
+// added Accept-Encoding and so decodes the response.
+func bunRequestHead(req *http.Request, body []byte, leadingLength bool) ([]byte, bool, error) {
 	values := make(map[string]string, len(req.Header))
 	for name, list := range req.Header {
 		for _, value := range list {
@@ -532,13 +551,14 @@ func bunRequestHead(req *http.Request, body []byte) ([]byte, bool, error) {
 	}
 	var head strings.Builder
 	head.WriteString(method + " " + req.URL.RequestURI() + " HTTP/1.1\r\n")
-	// fetch computes Content-Length itself when it has a body, so it appears in
-	// the common-header block instead of trailing the request. Header order is
-	// part of what a fingerprint sees, so it belongs where the runtime puts it.
+	// fetch computes Content-Length itself when it has a body. The 2.x runtime
+	// writes it in the common-header block; the 1.x runtime leaves it after
+	// Accept-Encoding. Header order is part of what a fingerprint sees, so each
+	// lane keeps its runtime's placement.
 	wroteLength := false
 	for _, name := range bunCommonHeaders {
 		lower := strings.ToLower(name)
-		if lower == "content-length" && body != nil {
+		if leadingLength && lower == "content-length" && body != nil {
 			head.WriteString(name + ": " + strconv.Itoa(len(body)) + "\r\n")
 			delete(values, lower)
 			wroteLength = true

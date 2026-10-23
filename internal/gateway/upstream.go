@@ -672,31 +672,53 @@ func prepareAnonymousBody(body []byte, protocol wire.Protocol, v1 bool) ([]byte,
 	if err := json.Unmarshal(body, &payload); err != nil {
 		return body, ""
 	}
-	changed := false
+	// Keep each top-level value's original bytes. Fields this function does not
+	// touch are written back verbatim, so nested objects (messages, content
+	// blocks) keep the caller client's key order instead of Go's alphabetical
+	// map order.
+	raw := rawTopLevel(body)
+	changed := make(map[string]bool, 4)
 	if streaming, ok := payload["stream"].(bool); !ok || !streaming {
 		payload["stream"] = true
-		changed = true
+		changed["stream"] = true
 	}
 	if ensureAnonymousChatUsage(payload, protocol) {
-		changed = true
+		changed["stream_options"] = true
 	}
 	var alias string
 	if v1 {
 		var toolChanged bool
 		alias, toolChanged = ensureV1ReadTool(payload, protocol)
 		if toolChanged {
-			changed = true
+			changed["tools"] = true
+		}
+		if alias != "" {
+			// rewriteV1ToolReferences may touch each of these fields.
+			changed["tool_choice"] = true
+			changed["messages"] = true
+			changed["input"] = true
 		}
 	} else if ensureV2Tools(payload, protocol) {
-		changed = true
+		changed["tools"] = true
 	}
-	if !v1 && protocol == wire.Chat && ensureV2CompletionLimit(payload) {
-		changed = true
+	if v1 {
+		if ensureV1CompletionLimit(payload, protocol) {
+			if protocol == wire.Chat {
+				changed["max_tokens"] = true
+			} else if protocol == wire.Responses {
+				changed["max_output_tokens"] = true
+			}
+		}
+	} else if protocol == wire.Chat && ensureV2CompletionLimit(payload) {
+		changed["max_completion_tokens"] = true
 	}
-	if !changed {
+	if ensureAnonymousToolChoice(payload, protocol) {
+		changed["tool_choice"] = true
+	}
+	if len(changed) == 0 {
 		return body, alias
 	}
-	encoded, err := encodeAnonymousBody(payload, protocol, v1)
+	encoded, err := encodeAnonymousBody(payload, raw, changed, protocol, v1)
 	if err != nil {
 		// The alias is dropped with the failed re-encode: the body never left
 		// the gateway, so there is nothing downstream to restore.
@@ -705,36 +727,111 @@ func prepareAnonymousBody(body []byte, protocol wire.Protocol, v1 bool) ([]byte,
 	return encoded, alias
 }
 
-// v2CompletionLimit is the max_completion_tokens a 2.x client puts on every
-// chat body, so the free tier always sees the same ceiling.
-const v2CompletionLimit = 32000
+// rawTopLevel returns each top-level value of a JSON object as the bytes the
+// caller sent. The body is already known to be a JSON object.
+func rawTopLevel(body []byte) map[string]json.RawMessage {
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(body, &raw); err != nil {
+		return nil
+	}
+	return raw
+}
 
-// ensureV2CompletionLimit adds the client's own max_completion_tokens when the
+// clientCompletionLimit is the output ceiling the official clients put on a
+// free-tier request when the caller asked for none.
+const clientCompletionLimit = 32000
+
+// ensureV1CompletionLimit adds the 1.x client's own output ceiling when the
+// caller did not ask for one: max_tokens on a chat body and
+// max_output_tokens on a Responses body. A caller-supplied limit of either
+// spelling wins, so an explicit ceiling is still honoured. It reports whether
+// the payload changed.
+func ensureV1CompletionLimit(payload map[string]any, protocol wire.Protocol) bool {
+	switch protocol {
+	case wire.Chat:
+		if value, ok := payload["max_tokens"]; ok && value != nil {
+			return false
+		}
+		if value, ok := payload["max_completion_tokens"]; ok && value != nil {
+			return false
+		}
+		payload["max_tokens"] = clientCompletionLimit
+		return true
+	case wire.Responses:
+		if value, ok := payload["max_output_tokens"]; ok && value != nil {
+			return false
+		}
+		if value, ok := payload["max_tokens"]; ok && value != nil {
+			return false
+		}
+		payload["max_output_tokens"] = clientCompletionLimit
+		return true
+	default:
+		return false
+	}
+}
+
+// ensureV2CompletionLimit adds the 2.x client's max_completion_tokens when the
 // caller did not ask for a ceiling. A caller-supplied max_tokens or
 // max_completion_tokens wins, so an explicit limit is still honoured. It
 // reports whether the payload changed.
 func ensureV2CompletionLimit(payload map[string]any) bool {
-	if _, ok := payload["max_completion_tokens"]; ok {
+	if value, ok := payload["max_completion_tokens"]; ok && value != nil {
 		return false
 	}
-	if _, ok := payload["max_tokens"]; ok {
+	if value, ok := payload["max_tokens"]; ok && value != nil {
 		return false
 	}
-	payload["max_completion_tokens"] = v2CompletionLimit
+	payload["max_completion_tokens"] = clientCompletionLimit
 	return true
 }
 
-// v2ChatKeyOrder is the order the 2.x client's JSON.stringify emits the keys of
-// a chat body in. Go serialises a map alphabetically, which puts
-// max_completion_tokens first where a real client starts with model; the bytes
-// parse the same either way, but the gateway exists to be indistinguishable, so
-// the skeleton is written in the client's order.
-var v2ChatKeyOrder = []string{"model", "messages", "tools", "stream", "stream_options", "max_completion_tokens"}
+// ensureAnonymousToolChoice adds the "auto" choice the official clients send
+// with a chat body that carries tools, unless the caller already chose one.
+// OpenAI's own default is auto, so the extra field does not change semantics;
+// it keeps the body shaped like the agent request the free tier expects.
+func ensureAnonymousToolChoice(payload map[string]any, protocol wire.Protocol) bool {
+	if protocol != wire.Chat {
+		return false
+	}
+	tools, ok := payload["tools"].([]any)
+	if !ok || len(tools) == 0 {
+		return false
+	}
+	if _, ok := payload["tool_choice"]; ok {
+		return false
+	}
+	payload["tool_choice"] = "auto"
+	return true
+}
 
-// marshalV2ChatBody encodes a chat payload with v2ChatKeyOrder first and any
-// remaining keys sorted after it. Values still go through encoding/json, so
-// only the key order differs from a plain marshal.
-func marshalV2ChatBody(payload map[string]any) ([]byte, error) {
+// The official clients serialise a request body in the order their SDK builds
+// it. Go serialises a map alphabetically, which puts max_tokens first where a
+// real client starts with model; the bytes parse the same either way, but the
+// gateway exists to be indistinguishable, so the skeleton is written in the
+// client's order and any field the list does not name follows sorted.
+var (
+	// Captured from an OpenCode 1.19.4 agent request: model, max_tokens,
+	// temperature, topP, messages, tools, tool_choice, stream, stream_options.
+	// The sampling fields sit ahead of messages in that client's builder, so
+	// their OpenAI spellings keep the same place.
+	v1ChatKeyOrder = []string{"model", "max_tokens", "temperature", "topP", "top_p", "frequency_penalty", "presence_penalty", "seed", "stop", "response_format", "messages", "tools", "tool_choice", "stream", "stream_options"}
+	// Captured from an OpenCode 1.19.4 Responses request: model, input,
+	// temperature, max_output_tokens, store, include, reasoning, stream.
+	v1ResponsesKeyOrder = []string{"model", "input", "instructions", "temperature", "max_output_tokens", "store", "include", "reasoning", "stream", "previous_response_id"}
+	// Captured from an OpenCode 1.19.4 Messages request: model, max_tokens,
+	// system, messages, tools, tool_choice, stream.
+	v1AnthropicKeyOrder = []string{"model", "max_tokens", "system", "messages", "tools", "tool_choice", "stream", "thinking"}
+	// Captured from an OpenCode 2.1.1 chat request, with tool_choice placed
+	// where both generated clients put it: tools, tool_choice, stream.
+	v2ChatKeyOrder = []string{"model", "messages", "tools", "tool_choice", "stream", "stream_options", "max_completion_tokens"}
+)
+
+// marshalOrderedBody encodes payload with order first and any remaining keys
+// sorted after it. A field this shaping pass did not change is written back as
+// the caller sent it, so its nested key order survives; a changed or new field
+// is encoded from payload.
+func marshalOrderedBody(payload map[string]any, raw map[string]json.RawMessage, changed map[string]bool, order []string) ([]byte, error) {
 	var buffer bytes.Buffer
 	buffer.WriteByte('{')
 	written := make(map[string]bool, len(payload))
@@ -748,9 +845,14 @@ func marshalV2ChatBody(payload map[string]any) ([]byte, error) {
 		if err != nil {
 			return err
 		}
-		valueJSON, err := jsonutil.Marshal(value)
-		if err != nil {
-			return err
+		var valueJSON []byte
+		if original, ok := raw[key]; ok && !changed[key] {
+			valueJSON = original
+		} else {
+			valueJSON, err = jsonutil.Marshal(value)
+			if err != nil {
+				return err
+			}
 		}
 		if !first {
 			buffer.WriteByte(',')
@@ -762,7 +864,7 @@ func marshalV2ChatBody(payload map[string]any) ([]byte, error) {
 		written[key] = true
 		return nil
 	}
-	for _, key := range v2ChatKeyOrder {
+	for _, key := range order {
 		if err := write(key); err != nil {
 			return nil, err
 		}
@@ -783,14 +885,22 @@ func marshalV2ChatBody(payload map[string]any) ([]byte, error) {
 	return buffer.Bytes(), nil
 }
 
-// encodeAnonymousBody renders a shaped anonymous payload in the byte layout the
-// lane's client produces: 2.x chat bodies keep the client's key order, every
-// other lane keeps plain encoding/json.
-func encodeAnonymousBody(payload map[string]any, protocol wire.Protocol, v1 bool) ([]byte, error) {
-	if !v1 && protocol == wire.Chat {
-		return marshalV2ChatBody(payload)
+// encodeAnonymousBody renders a shaped anonymous payload in the top-level key
+// order the lane's client produces, keeping untouched values byte-identical.
+// A lane without a captured order sorts its top-level keys.
+func encodeAnonymousBody(payload map[string]any, raw map[string]json.RawMessage, changed map[string]bool, protocol wire.Protocol, v1 bool) ([]byte, error) {
+	var order []string
+	switch {
+	case protocol == wire.Chat && v1:
+		order = v1ChatKeyOrder
+	case protocol == wire.Chat:
+		order = v2ChatKeyOrder
+	case protocol == wire.Responses && v1:
+		order = v1ResponsesKeyOrder
+	case protocol == wire.Anthropic && v1:
+		order = v1AnthropicKeyOrder
 	}
-	return jsonutil.Marshal(payload)
+	return marshalOrderedBody(payload, raw, changed, order)
 }
 
 // ensureAnonymousChatUsage keeps token usage available when a non-streaming
@@ -1495,6 +1605,9 @@ func upstreamRequest(ctx context.Context, baseURL string, protocol wire.Protocol
 	if protocol == wire.Anthropic && !models.IsV1Upstream(baseURL) {
 		endpoint = withAnthropicBeta(endpoint)
 	}
+	if !models.IsV1Upstream(baseURL) {
+		ctx = httpx.WithLeadingContentLength(ctx)
+	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(body))
 	if err != nil {
 		return nil, err
@@ -1551,20 +1664,27 @@ func withAnthropicBeta(endpoint string) string {
 	return parsed.String()
 }
 
-// setV1Headers renders the v1 lane's header set, that of an OpenCode 1.19.3
+// setV1Headers renders the v1 lane's header set, that of an OpenCode 1.19.4
 // model request on its opencode provider, as captured from the official
-// release: the AI SDK User-Agent of the package serving the protocol, both
-// session headers, the user message id as x-opencode-request (a fresh
-// ascending msg_ id when none was derived), the git root commit as the
-// project, the canonical parent session under both parent headers, and only
-// the anthropic-beta flags the AI SDK derives from the body. The v1 client
-// sends no x-session-affinity or X-Session-Id to this provider.
+// release: the AI SDK User-Agent of the package serving the protocol, the
+// current (child) session under both session headers, the user message id as
+// x-opencode-request (a fresh ascending msg_ id when none was derived), the git
+// root commit as the project, the canonical parent session under both parent
+// headers, and only the anthropic-beta flags the AI SDK derives from the body.
+// The v1 client sends no x-session-affinity or X-Session-Id to this provider.
 func setV1Headers(header http.Header, protocol wire.Protocol, body []byte, ids identity.RequestIDs) {
+	session := ids.Session
+	if ids.ChildSession != "" {
+		// A subagent runs in its own child session: the official client sends
+		// that child id in both session headers and reports the parent in the
+		// parent headers.
+		session = ids.ChildSession
+	}
 	header.Set("Accept", "*/*")
 	header.Set("User-Agent", httpx.V1ModelUserAgent(v1ProviderUtils(protocol)))
 	header.Set("x-opencode-client", "cli")
-	header.Set("x-opencode-session", ids.Session)
-	header.Set("x-opencode-session-id", ids.Session)
+	header.Set("x-opencode-session", session)
+	header.Set("x-opencode-session-id", session)
 	message := ids.Message
 	if message == "" {
 		message = identity.AscendingID("msg", time.Now())
