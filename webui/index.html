@@ -809,6 +809,20 @@
                       </label>
                     </div>
                     <div class="field full">
+                      <label class="check">
+                        <input id="c-headless" type="checkbox" />
+                        <span data-i18n="config.secrets.headless">用本机 opencode serve 承接匿名免费模型</span>
+                      </label>
+                    </div>
+                    <div class="field">
+                      <label for="c-headless-url" data-i18n="config.secrets.headlessUrl">opencode serve 地址</label>
+                      <input id="c-headless-url" placeholder="http://127.0.0.1:4097" />
+                    </div>
+                    <div class="field">
+                      <label for="c-headless-password" data-i18n="config.secrets.headlessPassword">serve 密码（留空保持不变）</label>
+                      <input id="c-headless-password" type="password" autocomplete="new-password" />
+                    </div>
+                    <div class="field full">
                       <label for="server_keys-new">Server Keys</label>
                       <div id="server_keys-chips" class="chips"></div>
                       <textarea

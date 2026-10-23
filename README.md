@@ -11,7 +11,7 @@ The executable includes the WebUI. Running the service requires no Node.js runti
 - JSON and SSE responses across all three inference protocols.
 - Text, images, reasoning, function tools, tool calls, and tool results; file content where the target protocol can represent it.
 - Separate Zen and Go key pools, configurable tier preference, retries, and session affinity.
-- Optional anonymous Zen access with the OpenCode `public` credential.
+- Optional anonymous Zen access with the OpenCode `public` credential, or a local official `opencode serve` for that free lane.
 - Direct, HTTP, HTTPS, SOCKS5, and SOCKS5H connections, including a proxy file.
 - Dynamic model discovery, native protocol metadata, and disk caches.
 - A separate management port with configuration editing, a Playground, diagnostics, token statistics, and live logs.
@@ -209,6 +209,8 @@ With `anonymous: true`, either condition makes a model eligible for the anonymou
 
 Eligibility is a routing decision; the upstream can still reject or rate-limit the request. Anonymous requests use `public` in the upstream authentication header.
 
+With `headless.enabled`, anonymous free requests skip the forged `public` credential and go to a local official `opencode serve` (`headless.base_url`, defaulting to `http://127.0.0.1:4097` when enabled and empty). The gateway opens one session per request, sends the conversation as text, and returns the assistant text as Chat Completions. A streaming client receives one SSE burst after the full reply is ready. Configured Zen and Go keys are unchanged and are used only when headless fails. `headless.password` is `OPENCODE_SERVER_PASSWORD` on that server, sent as basic auth with the username `opencode`. Leaving the password blank in the WebUI keeps the stored value. A gateway running in a container cannot reach the host's `127.0.0.1`; point `base_url` at the serve process on the same Docker network.
+
 The routing sequence is:
 
 1. For an eligible model, try up to `performance.max_anonymous_exits` available anonymous proxies once each. Every proxy tries the v2 `/inference` lane first, then the v1 `/zen` lane.
@@ -265,6 +267,9 @@ See [config.example.json](config.example.json) for a complete starting configura
 | `upstream.zen`              | `https://opencode.ai/zen`.                                                  |
 | `upstream.go`               | `https://opencode.ai/zen/go`.                                               |
 | `upstream.anonymous`        | `https://opencode.ai/inference`; tried first by the anonymous lane, which falls back to `/zen`. |
+| `headless.enabled`          | `false`. When `true`, anonymous free requests go to a local `opencode serve`. |
+| `headless.base_url`         | `http://127.0.0.1:4097` when enabled and empty.                             |
+| `headless.password`         | Empty. Matches `OPENCODE_SERVER_PASSWORD` and is omitted from WebUI reads. |
 | `proxies`                   | Falls back to `["direct"]` when both proxy sources are empty.               |
 | `proxyfile`                 | Optional; relative paths resolve beside the configuration file.             |
 | `models.refresh_seconds`    | `300`; minimum 1.                                                           |

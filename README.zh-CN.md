@@ -11,7 +11,7 @@ WebUI 内嵌在可执行文件中，运行服务无需 Node.js 或数据库。
 - 三种推理协议之间的普通 JSON 响应与 SSE 流式转换。
 - 文本、图片、reasoning、函数工具、工具调用和工具结果；目标协议允许时支持文件内容转换。
 - 独立的 Zen / Go Key 池，可配置优先级、重试和会话亲和性。
-- 使用 OpenCode `public` 凭证的可选 Zen 匿名通道。
+- 使用 OpenCode `public` 凭证的可选 Zen 匿名通道；也可改为把匿名免费请求交给本机官方 `opencode serve`。
 - 直连、HTTP、HTTPS、SOCKS5、SOCKS5H 连接，以及代理文件。
 - 动态模型发现、原生协议与能力信息、磁盘缓存。
 - 独立管理端口，支持配置编辑、Playground、路由诊断、Token 统计和实时日志。
@@ -209,6 +209,8 @@ System One 将自由文本状态与类型化问题配对，并返回类型化答
 
 这只是网关的路由判断，上游仍可能拒绝或限制请求。匿名请求在上游认证头中使用 `public` 凭证。
 
+启用 `headless.enabled` 后，匿名免费请求不再伪造 `public` 凭证，而是发给本机官方 `opencode serve`（`headless.base_url` 为空时默认 `http://127.0.0.1:4097`）。网关为每次请求新建一个 session，把对话收成文本，再把助手文本合成 Chat Completions；客户端要求流式时，在拿到完整回复后输出一段 SSE。已配置的 Zen / Go Key 保持不变，只有 headless 失败时才进入这些 Key。`headless.password` 对应用 serve 上的 `OPENCODE_SERVER_PASSWORD`，用户名固定为 `opencode`。WebUI 保存时密码留空表示保持原值。容器里的网关访问不到宿主机的 `127.0.0.1`，这时把地址写成 serve 在同一 Docker 网络上的名字。
+
 路由顺序：
 
 1. 符合条件的模型最多尝试 `performance.max_anonymous_exits` 个可用匿名代理，每个代理一次；每个代理先走 v2 `/inference`，再走 v1 `/zen`。
@@ -265,6 +267,9 @@ Key 初始化时均衡分配到代理。真实流量可以触发代理检查、K
 | `upstream.zen`              | `https://opencode.ai/zen`。                                                           |
 | `upstream.go`               | `https://opencode.ai/zen/go`。                                                        |
 | `upstream.anonymous`        | `https://opencode.ai/inference`；匿名通道优先使用，失败后回退到 `/zen`。             |
+| `headless.enabled`          | `false`。为 `true` 时，匿名免费请求交给本机 `opencode serve`。                        |
+| `headless.base_url`         | 启用且为空时为 `http://127.0.0.1:4097`。                                              |
+| `headless.password`         | 空。对应 `OPENCODE_SERVER_PASSWORD`，不会出现在 WebUI 的读取结果里。                  |
 | `proxies`                   | 两个代理来源都为空时，使用 `["direct"]`。                                             |
 | `proxyfile`                 | 可选；相对路径基于配置文件所在目录解析。                                              |
 | `models.refresh_seconds`    | `300`；最小为 1。                                                                     |

@@ -255,6 +255,9 @@ const DICTIONARY = {
         "Sensitive values are masked by default; a cleared value only takes effect after saving.",
       "config.secrets.reveal": "Reveal after re-verification",
       "config.secrets.anonymous": "Enable the Zen anonymous channel",
+      "config.secrets.headless": "Serve anonymous free models through a local opencode serve",
+      "config.secrets.headlessUrl": "opencode serve URL",
+      "config.secrets.headlessPassword": "serve password (leave blank to keep the current one)",
       "config.secrets.add": "One key per line",
       "config.proxy.title": "Proxy nodes",
       "config.proxy.caption":
@@ -802,6 +805,9 @@ const DICTIONARY = {
         "Giá trị nhạy cảm mặc định chỉ hiện dạng che; chỉ lưu sau khi gỡ bỏ mới có hiệu lực.",
       "config.secrets.reveal": "Xem sau khi xác minh lại",
       "config.secrets.anonymous": "Bật kênh ẩn danh Zen",
+      "config.secrets.headless": "Đưa mô hình miễn phí ẩn danh qua opencode serve cục bộ",
+      "config.secrets.headlessUrl": "Địa chỉ opencode serve",
+      "config.secrets.headlessPassword": "Mật khẩu serve (để trống để giữ nguyên)",
       "config.secrets.add": "Mỗi dòng thêm một key",
       "config.proxy.title": "Nút Proxy",
       "config.proxy.caption":
@@ -1360,6 +1366,9 @@ const DICTIONARY = {
         "I valori sensibili sono mascherati per impostazione predefinita; un valore svuotato ha effetto solo dopo il salvataggio.",
       "config.secrets.reveal": "Mostra dopo nuova verifica",
       "config.secrets.anonymous": "Abilita il canale anonimo Zen",
+      "config.secrets.headless": "Servi i modelli gratuiti anonimi tramite un opencode serve locale",
+      "config.secrets.headlessUrl": "URL di opencode serve",
+      "config.secrets.headlessPassword": "Password di serve (lascia vuoto per mantenere quella attuale)",
       "config.secrets.add": "Una chiave per riga",
       "config.proxy.title": "Nodi proxy",
       "config.proxy.caption":

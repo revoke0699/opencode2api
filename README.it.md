@@ -11,7 +11,7 @@ L'eseguibile include la WebUI: per eseguire il servizio non servono Node.js né 
 - Risposte JSON e SSE per tutti e tre i protocolli di inferenza.
 - Testo, immagini, ragionamento, function tool, tool call e tool result; contenuti di file quando il protocollo di destinazione li supporta.
 - Pool separati di chiavi Zen e Go, preferenza del tier configurabile, retry e affinità di sessione.
-- Accesso anonimo opzionale a Zen con la credenziale `public` di OpenCode.
+- Accesso anonimo opzionale a Zen con la credenziale `public` di OpenCode, oppure un `opencode serve` ufficiale locale per quel canale gratuito.
 - Connessioni dirette e tramite HTTP, HTTPS, SOCKS5 e SOCKS5H, anche da un file proxy.
 - Rilevamento dinamico dei modelli, metadati del protocollo nativo e cache su disco.
 - Porta di gestione separata con modifica della configurazione, Playground, diagnostica, statistiche dei token e log in tempo reale.
@@ -209,6 +209,8 @@ Con `anonymous: true`, un modello può usare il canale Zen anonimo se soddisfa u
 
 L'idoneità determina l'instradamento; l'upstream può comunque rifiutare o limitare la richiesta. Le richieste anonime usano `public` nell'header di autenticazione upstream.
 
+Con `headless.enabled`, le richieste gratuite anonime non falsificano la credenziale `public` e vanno a un `opencode serve` ufficiale locale (`headless.base_url`, predefinito `http://127.0.0.1:4097` se abilitato e vuoto). Il gateway apre una sessione per richiesta, invia la conversazione come testo e restituisce il testo dell'assistente come Chat Completions. Un client in streaming riceve un unico burst SSE a risposta completa. Le chiavi Zen e Go configurate restano invariate e si usano solo se headless fallisce. `headless.password` è `OPENCODE_SERVER_PASSWORD` di quel server, inviata come basic auth con username `opencode`. Una password vuota nella WebUI conserva il valore salvato. Un gateway in container non raggiunge il `127.0.0.1` dell'host: punta `base_url` al processo serve sulla stessa rete Docker.
+
 L'ordine di instradamento è:
 
 1. Per un modello idoneo, prova una volta ciascun proxy anonimo disponibile.
@@ -259,6 +261,9 @@ Consulta [config.example.json](config.example.json) per una configurazione inizi
 | `server_keys`               | È richiesta almeno una chiave locale.                                        |
 | `zen_keys`, `go_keys`       | È richiesta una chiave upstream, salvo accesso anonimo abilitato.            |
 | `anonymous`                 | `false`.                                                                      |
+| `headless.enabled`          | `false`. Se `true`, le richieste gratuite anonime vanno a un `opencode serve` locale. |
+| `headless.base_url`         | `http://127.0.0.1:4097` se abilitato e vuoto.                                 |
+| `headless.password`         | Vuota. Corrisponde a `OPENCODE_SERVER_PASSWORD` e non compare nelle letture WebUI. |
 | `prefer`                    | `go`; accetta `go` o `zen`.                                                   |
 | `upstream.zen`              | `https://opencode.ai/inference/openai`.                                       |
 | `upstream.go`               | `https://opencode.ai/zen/go`.                                                 |

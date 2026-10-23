@@ -11,7 +11,7 @@ File thực thi đã bao gồm WebUI. Việc chạy dịch vụ không cần Nod
 - Phản hồi JSON và SSE trên cả ba giao thức suy luận.
 - Văn bản, hình ảnh, suy luận, function tool, tool call và tool result; nội dung tệp ở nơi giao thức đích có thể biểu diễn.
 - Hai nhóm key Zen và Go riêng biệt, tier ưu tiên có thể cấu hình, retry và session affinity.
-- Truy cập Zen ẩn danh tuỳ chọn bằng credential `public` của OpenCode.
+- Truy cập Zen ẩn danh tuỳ chọn bằng credential `public` của OpenCode, hoặc một tiến trình `opencode serve` chính thức trên máy cục bộ cho làn miễn phí đó.
 - Kết nối direct, HTTP, HTTPS, SOCKS5 và SOCKS5H, bao gồm cả file proxy.
 - Tự động phát hiện mô hình, metadata giao thức gốc và cache trên đĩa.
 - Cổng quản trị riêng với chỉnh sửa cấu hình, Playground, chẩn đoán, thống kê token và log trực tiếp.
@@ -213,6 +213,8 @@ Khi `anonymous: true`, chỉ cần một trong hai điều kiện sau là mô h�
 
 Điều kiện là một quyết định định tuyến; upstream vẫn có thể từ chối hoặc giới hạn tần suất request. Request ẩn danh dùng `public` trong header xác thực của upstream.
 
+Khi `headless.enabled` bật, request miễn phí ẩn danh không còn giả credential `public` mà được gửi tới `opencode serve` chính thức trên máy cục bộ (`headless.base_url`, mặc định `http://127.0.0.1:4097` khi bật mà để trống). Gateway tạo một session cho mỗi request, gửi hội thoại dưới dạng văn bản, rồi trả lời của trợ lý dưới dạng Chat Completions. Client yêu cầu stream sẽ nhận một đợt SSE sau khi đã có câu trả lời đầy đủ. Key Zen và Go đã cấu hình không đổi, và chỉ được dùng khi headless thất bại. `headless.password` là `OPENCODE_SERVER_PASSWORD` của serve, gửi bằng basic auth với tên người dùng `opencode`. Để trống mật khẩu trên WebUI sẽ giữ giá trị đang lưu. Gateway chạy trong container không truy cập được `127.0.0.1` của host; hãy trỏ `base_url` tới tiến trình serve trên cùng mạng Docker.
+
 Trình tự định tuyến là:
 
 1. Với mô hình đủ điều kiện, thử tối đa `performance.max_anonymous_exits` proxy ẩn danh khả dụng, mỗi proxy một lần; mỗi proxy thử làn v2 `/inference` trước, rồi làn v1 `/zen`.
@@ -269,6 +271,9 @@ Xem [config.example.json](config.example.json) để có một cấu hình khở
 | `upstream.zen`             | `https://opencode.ai/zen`.                                       |
 | `upstream.go`              | `https://opencode.ai/zen/go`.                                    |
 | `upstream.anonymous`       | `https://opencode.ai/inference`; kênh ẩn danh thử trước, dự phòng về `/zen`. |
+| `headless.enabled`         | `false`. Khi `true`, request miễn phí ẩn danh đi tới `opencode serve` cục bộ. |
+| `headless.base_url`        | `http://127.0.0.1:4097` khi bật và để trống.                   |
+| `headless.password`        | Rỗng. Khớp `OPENCODE_SERVER_PASSWORD` và không xuất hiện khi WebUI đọc cấu hình. |
 | `proxies`                  | Rơi về `["direct"]` khi cả hai nguồn proxy đều rỗng.              |
 | `proxyfile`                | Không bắt buộc; đường dẫn tương đối được phân giải cạnh file cấu hình. |
 | `models.refresh_seconds`   | `300`; tối thiểu 1.                                              |

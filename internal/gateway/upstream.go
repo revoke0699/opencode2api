@@ -232,7 +232,17 @@ func (g *Gateway) doUpstreamTiers(ctx context.Context, route models.Route, bodie
 		return resp, route, attemptOffset + used, err
 	}
 	blocked := false
-	if route.Anonymous {
+	if route.Anonymous && g.cfg.Headless.Enabled {
+		resp, err := g.serveHeadless(ctx, route, bodies, ids)
+		attempts++
+		if err == nil && resp != nil && (resp.StatusCode/100 == 2 || resp.StatusCode/100 == 4) {
+			// A 2xx is the answer. A 4xx is a problem with this request
+			// (empty text, for example); another tier cannot repair it.
+			return resp, headlessRoute(route), attempts, nil
+		}
+		lastResponse, lastErr = resp, err
+		g.logger.Warn("headless opencode serve did not succeed; entering preferred key tiers", "component", "upstream", "event", "headless_fallback", "request_id", ids.Request, "error", err)
+	} else if route.Anonymous {
 		resp, err, used := g.doAnonymousUpstream(ctx, route, bodies, ids, attempts)
 		attempts += used
 		if err == nil && resp != nil && resp.StatusCode/100 == 2 {

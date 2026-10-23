@@ -11,6 +11,10 @@
     "go": "https://opencode.ai/zen/go",
     "anonymous": "https://opencode.ai/inference"
   },
+  "headless": {
+    "enabled": false,
+    "base_url": "http://127.0.0.1:4097"
+  },
   "retry": {
     "max_attempts": 3,
     "timeout_seconds": 300

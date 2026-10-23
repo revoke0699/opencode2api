@@ -53,6 +53,10 @@ function fillConfig(value) {
   $("#c-session").value = value.webui.session_ttl_minutes;
   $("#c-web-enabled").checked = value.webui.enabled;
   $("#c-anonymous").checked = !!value.anonymous;
+  const headless = value.headless || {};
+  $("#c-headless").checked = !!headless.enabled;
+  $("#c-headless-url").value = headless.base_url || "";
+  $("#c-headless-password").value = "";
   $("#c-proxyfile").value = value.proxyfile;
   $("#c-up-zen").value = value.upstream.zen;
   $("#c-up-go").value = value.upstream.go;
@@ -90,6 +94,11 @@ async function save(event) {
       zen_keys: secretInputs("zen_keys"),
       go_keys: secretInputs("go_keys"),
       anonymous: $("#c-anonymous").checked,
+      headless: {
+        enabled: $("#c-headless").checked,
+        base_url: $("#c-headless-url").value,
+        password: $("#c-headless-password").value,
+      },
       proxies: secretInputs("proxies"),
       proxyfile: $("#c-proxyfile").value,
       prefer: $("#c-prefer").value,

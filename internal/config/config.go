@@ -34,13 +34,17 @@ type Config struct {
 	Proxies           []string                     `json:"proxies"`
 	ProxyFile         string                       `json:"proxyfile"`
 	Upstream          UpstreamConfig               `json:"upstream"`
-	Retry             RetryConfig                  `json:"retry"`
-	Models            ModelsConfig                 `json:"models"`
-	Performance       PerformanceConfig            `json:"performance"`
-	Logging           LoggingConfig                `json:"logging"`
-	WebUI             WebUIConfig                  `json:"webui"`
-	Prefer            Tier                         `json:"prefer"`
-	Reasoning         ReasoningConfig              `json:"reasoning"`
+	// Headless, when enabled, serves the anonymous free tier through a local
+	// official `opencode serve` instead of forging a client against the public
+	// gateway. Keyed Zen and Go traffic is unchanged.
+	Headless    HeadlessConfig    `json:"headless,omitempty"`
+	Retry       RetryConfig       `json:"retry"`
+	Models      ModelsConfig      `json:"models"`
+	Performance PerformanceConfig `json:"performance"`
+	Logging     LoggingConfig     `json:"logging"`
+	WebUI       WebUIConfig       `json:"webui"`
+	Prefer      Tier              `json:"prefer"`
+	Reasoning   ReasoningConfig   `json:"reasoning"`
 
 	effectiveProxies []string
 }
@@ -60,6 +64,16 @@ type ReasoningConfig struct {
 	// never set, matching how the rest of the optional surface is persisted.
 	Effort        string            `json:"effort,omitempty"`
 	EffortByModel map[string]string `json:"effort_by_model,omitempty"`
+}
+
+// HeadlessConfig points the anonymous free tier at a local official
+// `opencode serve`. BaseURL defaults to http://127.0.0.1:4097 when enabled
+// and empty. Password is sent as basic auth when OPENCODE_SERVER_PASSWORD is
+// set on that server; it is never required.
+type HeadlessConfig struct {
+	Enabled  bool   `json:"enabled"`
+	BaseURL  string `json:"base_url,omitempty"`
+	Password string `json:"password,omitempty"`
 }
 
 // UpstreamConfig holds the base URLs of the OpenCode origins. The gateway
@@ -287,6 +301,16 @@ func Normalize(path string, cfg Config) (Config, error) {
 	cfg.Upstream.Anonymous = strings.TrimSpace(cfg.Upstream.Anonymous)
 	if cfg.Upstream.Anonymous == "" {
 		cfg.Upstream.Anonymous = "https://opencode.ai/inference"
+	}
+	cfg.Headless.BaseURL = strings.TrimSpace(cfg.Headless.BaseURL)
+	if cfg.Headless.Enabled && cfg.Headless.BaseURL == "" {
+		cfg.Headless.BaseURL = "http://127.0.0.1:4097"
+	}
+	if cfg.Headless.BaseURL != "" {
+		u, err := url.Parse(cfg.Headless.BaseURL)
+		if err != nil || u.Host == "" || (strings.ToLower(u.Scheme) != "http" && strings.ToLower(u.Scheme) != "https") {
+			return Config{}, errors.New("headless.base_url must be an http or https URL")
+		}
 	}
 	for name, raw := range map[string]string{"upstream.zen": cfg.Upstream.Zen, "upstream.go": cfg.Upstream.Go, "upstream.anonymous": cfg.Upstream.Anonymous} {
 		u, err := url.Parse(strings.TrimSpace(raw))
