@@ -72,6 +72,11 @@ func (r *Redactor) Replace(cfg Config) {
 	if cfg.Headless.Password != "" {
 		values = append(values, cfg.Headless.Password)
 	}
+	for _, instance := range cfg.Headless.Instances {
+		if instance.Password != "" {
+			values = append(values, instance.Password)
+		}
+	}
 	for _, value := range []string{cfg.Upstream.Zen, cfg.Upstream.Go, cfg.Upstream.Anonymous} {
 		if parsed, err := url.Parse(value); err == nil && parsed.User != nil {
 			values = append(values, value, parsed.User.Username())

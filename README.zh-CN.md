@@ -209,7 +209,7 @@ System One 将自由文本状态与类型化问题配对，并返回类型化答
 
 这只是网关的路由判断，上游仍可能拒绝或限制请求。匿名请求在上游认证头中使用 `public` 凭证。
 
-启用 `headless.enabled` 后，匿名免费请求不再伪造 `public` 凭证，而是发给本机官方 `opencode serve`（`headless.base_url` 为空时默认 `http://127.0.0.1:4097`）。网关为每次请求新建一个 session，把对话收成文本，再把助手文本合成 Chat Completions；客户端要求流式时，在拿到完整回复后输出一段 SSE。已配置的 Zen / Go Key 保持不变，只有 headless 失败时才进入这些 Key。`headless.password` 对应用 serve 上的 `OPENCODE_SERVER_PASSWORD`，用户名固定为 `opencode`。WebUI 保存时密码留空表示保持原值。容器里的网关访问不到宿主机的 `127.0.0.1`，这时把地址写成 serve 在同一 Docker 网络上的名字。
+启用 `headless.enabled` 后，匿名免费请求不再伪造 `public` 凭证，而是发给本机官方 `opencode serve`（`headless.base_url` 为空时默认 `http://127.0.0.1:4097`）。网关为每次请求新建一个 session，把对话收成文本，再把助手文本合成 Chat Completions；客户端要求流式时，在拿到完整回复后输出一段 SSE。已配置的 Zen / Go Key 保持不变，只有 headless 失败时才进入这些 Key。`headless.instances` 列出多份官方进程时，网关轮流使用；某一份返回 IP 滥用、免费额度或 FreeTier 拒绝时，会冷却该地址并在同一次请求里改用下一份。同一份官方二进制的 TLS 指纹相同，要让上游看到不同身份，每份进程需要自己的数据目录和出口。`headless.password` 对应用 serve 上的 `OPENCODE_SERVER_PASSWORD`，用户名固定为 `opencode`。WebUI 保存时密码留空表示保持原值。容器里的网关访问不到宿主机的 `127.0.0.1`，这时把地址写成 serve 在同一 Docker 网络上的名字。
 
 路由顺序：
 
@@ -270,6 +270,7 @@ Key 初始化时均衡分配到代理。真实流量可以触发代理检查、K
 | `headless.enabled`          | `false`。为 `true` 时，匿名免费请求交给本机 `opencode serve`。                        |
 | `headless.base_url`         | 启用且为空时为 `http://127.0.0.1:4097`。                                              |
 | `headless.password`         | 空。对应 `OPENCODE_SERVER_PASSWORD`，不会出现在 WebUI 的读取结果里。                  |
+| `headless.instances`        | 空。多份 `opencode serve` 的地址；被封的地址会冷却并换下一份。                         |
 | `proxies`                   | 两个代理来源都为空时，使用 `["direct"]`。                                             |
 | `proxyfile`                 | 可选；相对路径基于配置文件所在目录解析。                                              |
 | `models.refresh_seconds`    | `300`；最小为 1。                                                                     |

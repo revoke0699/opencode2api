@@ -163,12 +163,13 @@ type EffectiveView struct {
 	WebUIEnabled bool   `json:"webui_enabled"`
 }
 
-// HeadlessView is the anonymous-lane opencode serve setting. The password is
-// never returned; HasPassword tells the console that one is already stored.
+// HeadlessView is the anonymous-lane opencode serve setting. Passwords are
+// never returned. Instances lists the fingerprint pool by address only.
 type HeadlessView struct {
-	Enabled     bool   `json:"enabled"`
-	BaseURL     string `json:"base_url"`
-	HasPassword bool   `json:"has_password"`
+	Enabled     bool     `json:"enabled"`
+	BaseURL     string   `json:"base_url"`
+	HasPassword bool     `json:"has_password"`
+	Instances   []string `json:"instances,omitempty"`
 }
 
 // WebUIView is the writable part of the WebUI configuration; the password and
@@ -259,6 +260,22 @@ func (a *Server) handlePutConfig(w http.ResponseWriter, r *http.Request) {
 		headless = *update.Headless
 		if strings.TrimSpace(headless.Password) == "" {
 			headless.Password = current.Headless.Password
+		}
+		// The WebUI form does not edit the pool. An omitted list keeps the
+		// identities already stored; an empty password on a submitted identity
+		// keeps that identity's password.
+		if headless.Instances == nil {
+			headless.Instances = current.Headless.Instances
+		} else {
+			previous := make(map[string]string, len(current.Headless.Instances))
+			for _, inst := range current.Headless.Instances {
+				previous[inst.BaseURL] = inst.Password
+			}
+			for i := range headless.Instances {
+				if strings.TrimSpace(headless.Instances[i].Password) == "" {
+					headless.Instances[i].Password = previous[headless.Instances[i].BaseURL]
+				}
+			}
 		}
 	}
 	candidate := config.Config{
@@ -402,6 +419,18 @@ func (a *Server) sessionTokenValid(token string) bool {
 	return session.Username == cfg.WebUI.Username && session.AuthVersion == config.Fingerprint(cfg.WebUI.PasswordHash)
 }
 
+func headlessView(cfg config.HeadlessConfig) HeadlessView {
+	view := HeadlessView{Enabled: cfg.Enabled, BaseURL: cfg.BaseURL, HasPassword: cfg.Password != ""}
+	if len(cfg.Instances) == 0 {
+		return view
+	}
+	view.Instances = make([]string, len(cfg.Instances))
+	for i, inst := range cfg.Instances {
+		view.Instances[i] = inst.BaseURL
+	}
+	return view
+}
+
 // configView builds the masked view of the current configuration.
 func (a *Server) configView() ConfigView {
 	cfg := a.manager.Config()
@@ -410,7 +439,7 @@ func (a *Server) configView() ConfigView {
 		Listen: cfg.Listen, ServerKeys: maskSecrets(cfg.ServerKeys, false), ZenKeys: maskSecrets(cfg.ZenKeys, false), GoKeys: maskSecrets(cfg.GoKeys, false), Anonymous: cfg.Anonymous,
 		Proxies: maskSecrets(cfg.Proxies, true), ProxyFile: cfg.ProxyFile, Upstream: cfg.Upstream, Retry: cfg.Retry, Models: cfg.Models,
 		Performance: cfg.Performance, Logging: cfg.Logging, Prefer: cfg.Prefer, Reasoning: cfg.Reasoning,
-		Headless:  HeadlessView{Enabled: cfg.Headless.Enabled, BaseURL: cfg.Headless.BaseURL, HasPassword: cfg.Headless.Password != ""},
+		Headless:  headlessView(cfg.Headless),
 		WebUI:     WebUIView{Enabled: cfg.WebUI.Enabled, Listen: cfg.WebUI.Listen, Username: cfg.WebUI.Username, SessionTTLMinutes: cfg.WebUI.SessionTTLMinutes},
 		Effective: EffectiveView{Listen: effective.API, WebUIListen: effective.WebUI, WebUIEnabled: effective.WebUIEnabled},
 		Restart:   restart,

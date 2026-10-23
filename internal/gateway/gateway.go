@@ -87,6 +87,8 @@ type Gateway struct {
 	// freeTierBlock is how long an exit the free tier flagged stays out of the
 	// anonymous cursor. Zero uses freeTierBlockTTL.
 	freeTierBlock time.Duration
+	// headless rotates official serve processes when one identity is blocked.
+	headless *headlessPool
 }
 
 // New builds a Gateway for cfg: one proxy transport per runtime proxy (a
@@ -128,6 +130,7 @@ func New(cfg config.Config, logger *slog.Logger, monitor *telemetry.Metrics) (*G
 		monitor:        monitor,
 		attemptTimeout: attemptDeadline(cfg),
 		freeTierBlock:  time.Duration(cfg.Performance.FreeTierBlockSeconds) * time.Second,
+		headless:       newHeadlessPool(),
 	}, nil
 }
 

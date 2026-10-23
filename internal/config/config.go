@@ -70,10 +70,37 @@ type ReasoningConfig struct {
 // `opencode serve`. BaseURL defaults to http://127.0.0.1:4097 when enabled
 // and empty. Password is sent as basic auth when OPENCODE_SERVER_PASSWORD is
 // set on that server; it is never required.
+//
+// Instances is an optional pool of serve processes. Each entry is one
+// fingerprint: its own data directory and, when the operator set it up that
+// way, its own egress. A blocked instance is skipped until its cooldown
+// ends. An empty list uses BaseURL as the only instance.
 type HeadlessConfig struct {
-	Enabled  bool   `json:"enabled"`
-	BaseURL  string `json:"base_url,omitempty"`
+	Enabled   bool               `json:"enabled"`
+	BaseURL   string             `json:"base_url,omitempty"`
+	Password  string             `json:"password,omitempty"`
+	Instances []HeadlessInstance `json:"instances,omitempty"`
+}
+
+// HeadlessInstance is one opencode serve process in the fingerprint pool.
+// An empty Password uses HeadlessConfig.Password.
+type HeadlessInstance struct {
+	BaseURL  string `json:"base_url"`
 	Password string `json:"password,omitempty"`
+}
+
+// Endpoints is the fingerprint pool in try order before rotation. Configured
+// instances win; otherwise the single BaseURL is the only endpoint.
+func (h HeadlessConfig) Endpoints() []HeadlessInstance {
+	if len(h.Instances) > 0 {
+		out := make([]HeadlessInstance, len(h.Instances))
+		copy(out, h.Instances)
+		return out
+	}
+	if h.BaseURL == "" {
+		return nil
+	}
+	return []HeadlessInstance{{BaseURL: h.BaseURL, Password: h.Password}}
 }
 
 // UpstreamConfig holds the base URLs of the OpenCode origins. The gateway
@@ -270,6 +297,14 @@ func Load(path string) (Config, error) {
 	return Normalize(path, cfg)
 }
 
+func requireHTTPURL(raw string) error {
+	u, err := url.Parse(strings.TrimSpace(raw))
+	if err != nil || u.Host == "" || (strings.ToLower(u.Scheme) != "http" && strings.ToLower(u.Scheme) != "https") {
+		return errors.New("must be an http or https URL")
+	}
+	return nil
+}
+
 // Normalize resolves external inputs and validates a Config supplied by
 // either the JSON file or the authenticated management API. A relative
 // proxyfile is resolved against the directory of path.
@@ -303,18 +338,22 @@ func Normalize(path string, cfg Config) (Config, error) {
 		cfg.Upstream.Anonymous = "https://opencode.ai/inference"
 	}
 	cfg.Headless.BaseURL = strings.TrimSpace(cfg.Headless.BaseURL)
-	if cfg.Headless.Enabled && cfg.Headless.BaseURL == "" {
+	if cfg.Headless.Enabled && cfg.Headless.BaseURL == "" && len(cfg.Headless.Instances) == 0 {
 		cfg.Headless.BaseURL = "http://127.0.0.1:4097"
 	}
 	if cfg.Headless.BaseURL != "" {
-		u, err := url.Parse(cfg.Headless.BaseURL)
-		if err != nil || u.Host == "" || (strings.ToLower(u.Scheme) != "http" && strings.ToLower(u.Scheme) != "https") {
+		if err := requireHTTPURL(cfg.Headless.BaseURL); err != nil {
 			return Config{}, errors.New("headless.base_url must be an http or https URL")
 		}
 	}
+	for i := range cfg.Headless.Instances {
+		cfg.Headless.Instances[i].BaseURL = strings.TrimSpace(cfg.Headless.Instances[i].BaseURL)
+		if err := requireHTTPURL(cfg.Headless.Instances[i].BaseURL); err != nil {
+			return Config{}, fmt.Errorf("headless.instances[%d].base_url must be an http or https URL", i)
+		}
+	}
 	for name, raw := range map[string]string{"upstream.zen": cfg.Upstream.Zen, "upstream.go": cfg.Upstream.Go, "upstream.anonymous": cfg.Upstream.Anonymous} {
-		u, err := url.Parse(strings.TrimSpace(raw))
-		if err != nil || u.Host == "" || (strings.ToLower(u.Scheme) != "http" && strings.ToLower(u.Scheme) != "https") {
+		if err := requireHTTPURL(raw); err != nil {
 			return Config{}, fmt.Errorf("%s must be an http or https URL", name)
 		}
 	}

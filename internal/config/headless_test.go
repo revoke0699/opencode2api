@@ -26,6 +26,25 @@ func TestHeadlessBaseURLDefaultsWhenEnabled(t *testing.T) {
 	}
 }
 
+func TestHeadlessEndpointsPreferInstances(t *testing.T) {
+	cfg := HeadlessConfig{
+		BaseURL:  "http://127.0.0.1:4097",
+		Password: "shared",
+		Instances: []HeadlessInstance{
+			{BaseURL: "http://127.0.0.1:4097"},
+			{BaseURL: "http://127.0.0.1:4098"},
+		},
+	}
+	got := cfg.Endpoints()
+	if len(got) != 2 || got[1].BaseURL != "http://127.0.0.1:4098" {
+		t.Fatalf("endpoints = %+v", got)
+	}
+	single := HeadlessConfig{BaseURL: "http://127.0.0.1:4097", Password: "shared"}.Endpoints()
+	if len(single) != 1 || single[0].Password != "shared" {
+		t.Fatalf("single = %+v", single)
+	}
+}
+
 func TestHeadlessBaseURLRejectsNonHTTP(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "config.json")

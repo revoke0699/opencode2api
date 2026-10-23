@@ -209,7 +209,7 @@ With `anonymous: true`, either condition makes a model eligible for the anonymou
 
 Eligibility is a routing decision; the upstream can still reject or rate-limit the request. Anonymous requests use `public` in the upstream authentication header.
 
-With `headless.enabled`, anonymous free requests skip the forged `public` credential and go to a local official `opencode serve` (`headless.base_url`, defaulting to `http://127.0.0.1:4097` when enabled and empty). The gateway opens one session per request, sends the conversation as text, and returns the assistant text as Chat Completions. A streaming client receives one SSE burst after the full reply is ready. Configured Zen and Go keys are unchanged and are used only when headless fails. `headless.password` is `OPENCODE_SERVER_PASSWORD` on that server, sent as basic auth with the username `opencode`. Leaving the password blank in the WebUI keeps the stored value. A gateway running in a container cannot reach the host's `127.0.0.1`; point `base_url` at the serve process on the same Docker network.
+With `headless.enabled`, anonymous free requests skip the forged `public` credential and go to a local official `opencode serve` (`headless.base_url`, defaulting to `http://127.0.0.1:4097` when enabled and empty). The gateway opens one session per request, sends the conversation as text, and returns the assistant text as Chat Completions. A streaming client receives one SSE burst after the full reply is ready. Configured Zen and Go keys are unchanged and are used only when headless fails. `headless.instances` lists several official processes. The gateway rotates through them, and an IP-abuse, free-quota, or FreeTier refusal cools that address and tries the next one in the same request. Copies of the same official binary share a TLS fingerprint; a distinct identity needs its own data directory and egress. `headless.password` is `OPENCODE_SERVER_PASSWORD` on that server, sent as basic auth with the username `opencode`. Leaving the password blank in the WebUI keeps the stored value. A gateway running in a container cannot reach the host's `127.0.0.1`; point `base_url` at the serve process on the same Docker network.
 
 The routing sequence is:
 
@@ -270,6 +270,7 @@ See [config.example.json](config.example.json) for a complete starting configura
 | `headless.enabled`          | `false`. When `true`, anonymous free requests go to a local `opencode serve`. |
 | `headless.base_url`         | `http://127.0.0.1:4097` when enabled and empty.                             |
 | `headless.password`         | Empty. Matches `OPENCODE_SERVER_PASSWORD` and is omitted from WebUI reads. |
+| `headless.instances`        | Empty. Addresses of several `opencode serve` processes; a blocked address cools down and the next one is used. |
 | `proxies`                   | Falls back to `["direct"]` when both proxy sources are empty.               |
 | `proxyfile`                 | Optional; relative paths resolve beside the configuration file.             |
 | `models.refresh_seconds`    | `300`; minimum 1.                                                           |

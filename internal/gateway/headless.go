@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"time"
 
 	"opencode2api/internal/config"
@@ -13,7 +14,6 @@ import (
 	"opencode2api/internal/identity"
 	"opencode2api/internal/models"
 	wire "opencode2api/internal/protocol"
-	"opencode2api/internal/telemetry"
 )
 
 // clientStreamKey carries the caller's stream flag. Anonymous bodies are
@@ -35,44 +35,78 @@ func clientRequestedStream(ctx context.Context) bool {
 // gateway's existing translator can still adapt it to the client protocol.
 // A non-nil response is the answer even when the status is not 2xx.
 func (g *Gateway) serveHeadless(ctx context.Context, route models.Route, bodies map[config.Tier][]byte, ids identity.RequestIDs) (*http.Response, error) {
-	started := time.Now()
-	setRequestCredential(ctx, config.TierZen, "headless", "headless", true, nil)
 	prompt := headless.ConversationText(headlessBody(bodies))
 	if prompt == "" {
 		resp := headlessErrorResponse(http.StatusBadRequest, "headless request has no text to send")
-		g.recordUpstreamAttempt(ctx, route, ids, 1, "headless", "headless", true, nil, resp, nil, time.Since(started))
+		g.recordUpstreamAttempt(ctx, route, ids, 1, "headless", "headless", true, nil, resp, nil, 0)
 		return resp, nil
 	}
+	instances := g.headless.order(g.cfg.Headless.Endpoints(), time.Now())
+	if len(instances) == 0 {
+		return nil, fmt.Errorf("every headless identity is cooling")
+	}
 	provider, modelID := headless.ModelRef(route.ID)
-	result, err := (headless.Client{
-		BaseURL:  g.cfg.Headless.BaseURL,
-		Password: g.cfg.Headless.Password,
-	}).Complete(ctx, provider, modelID, prompt)
-	if err != nil {
-		g.recordUpstreamAttempt(ctx, route, ids, 1, "headless", "headless", true, nil, nil, err, time.Since(started))
-		if meta := telemetry.MetaFromContext(ctx); meta != nil {
-			meta.Legs = append(meta.Legs, "headless:error:"+fmt.Sprint(time.Since(started).Milliseconds())+"ms")
+	var lastErr error
+	for attempt, inst := range instances {
+		if ctx.Err() != nil {
+			if lastErr == nil {
+				lastErr = ctx.Err()
+			}
+			break
 		}
-		return nil, err
+		label := headlessLabel(inst.BaseURL)
+		started := time.Now()
+		setRequestCredential(ctx, config.TierZen, label, "headless", false, nil)
+		password := inst.Password
+		if password == "" {
+			password = g.cfg.Headless.Password
+		}
+		result, err := (headless.Client{
+			BaseURL:  inst.BaseURL,
+			Password: password,
+		}).Complete(ctx, provider, modelID, prompt)
+		if err != nil {
+			lastErr = err
+			g.recordUpstreamAttempt(ctx, route, ids, attempt+1, label, "headless", false, nil, nil, err, time.Since(started))
+			cool := headlessTransportCool
+			if headless.IdentityBlocked(err) {
+				cool = g.freeTierBlockTTL()
+				g.logger.Warn("headless identity blocked; rotating", "component", "upstream", "event", "headless_identity_blocked", "request_id", ids.Request, "identity", label, "block_for", cool.String())
+			}
+			g.headless.cool(inst.BaseURL, time.Now().Add(cool))
+			continue
+		}
+		var body []byte
+		contentType := "application/json"
+		if clientRequestedStream(ctx) {
+			body = headless.ChatSSE(result)
+			contentType = "text/event-stream"
+		} else {
+			body = headless.ChatJSON(result)
+		}
+		resp := &http.Response{
+			StatusCode:    http.StatusOK,
+			Status:        "200 OK",
+			Header:        make(http.Header),
+			Body:          io.NopCloser(bytes.NewReader(body)),
+			ContentLength: int64(len(body)),
+		}
+		resp.Header.Set("Content-Type", contentType)
+		g.recordUpstreamAttempt(ctx, route, ids, attempt+1, label, "headless", false, nil, resp, nil, time.Since(started))
+		return resp, nil
 	}
-	var body []byte
-	contentType := "application/json"
-	if clientRequestedStream(ctx) {
-		body = headless.ChatSSE(result)
-		contentType = "text/event-stream"
-	} else {
-		body = headless.ChatJSON(result)
+	if lastErr == nil {
+		lastErr = fmt.Errorf("every headless identity is cooling")
 	}
-	resp := &http.Response{
-		StatusCode:    http.StatusOK,
-		Status:        "200 OK",
-		Header:        make(http.Header),
-		Body:          io.NopCloser(bytes.NewReader(body)),
-		ContentLength: int64(len(body)),
+	return nil, lastErr
+}
+
+func headlessLabel(raw string) string {
+	u, err := url.Parse(raw)
+	if err != nil || u.Host == "" {
+		return "headless"
 	}
-	resp.Header.Set("Content-Type", contentType)
-	g.recordUpstreamAttempt(ctx, route, ids, 1, "headless", "headless", true, nil, resp, nil, time.Since(started))
-	return resp, nil
+	return u.Host
 }
 
 func headlessBody(bodies map[config.Tier][]byte) []byte {
